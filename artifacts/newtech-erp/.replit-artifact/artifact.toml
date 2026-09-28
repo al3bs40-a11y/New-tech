@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "NEWTECH Management System"
+description = "A production-oriented Arabic RTL accounting, inventory, POS, sales, and settlement management system for NEWTECH electronics store in Khartoum."
+version = "1.0.0"
+id = "artifacts/newtech-erp"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18122
+
+[services.development]
+run = "pnpm --filter @workspace/newtech-erp run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/newtech-erp", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/newtech-erp/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18122"
+BASE_PATH = "/"
