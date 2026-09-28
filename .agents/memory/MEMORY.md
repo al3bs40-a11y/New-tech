@@ -1,3 +1,4 @@
 - [Role security boundary](role-security-boundary.md) — enforce NEWTECH admin/seller permissions on the API; hiding UI controls is never sufficient.
 - [Sales posting invariants](sales-posting-invariants.md) — sale, stock, customer debt, and proceeds must post as one consistent transaction.
 - [Seller account history](seller-account-history.md) — do not re-seed the removed default seller; preserve historical activity signatures when accounts are deleted.
+- [Connector helper calls](connector-helper-calls.md) — invoke documented helpers inside `use impure`; `typeof` probes may misleadingly report `undefined`.
