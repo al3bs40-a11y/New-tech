@@ -319,8 +319,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
+        "400":
+          description: Invalid product update or attempted stock quantity change
+        "403":
+          description: Sellers may only update the selling price
         "404":
           description: Product not found
+        "409":
+          description: Product barcode is already assigned to another product
+    delete:
+      operationId: deleteProduct
+      tags: [products]
+      summary: Delete an unused inventory product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Product deleted
+        "403":
+          description: Administrators only
+        "404":
+          description: Product not found
+        "409":
+          description: Product is referenced by sale or adjustment history
   /sales:
     get:
       operationId: getSales
@@ -566,6 +591,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+  /customers/{id}:
+    delete:
+      operationId: deleteCustomer
+      tags: [customers]
+      summary: Delete a customer without outstanding debt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Customer deleted
+        "403":
+          description: Administrators only
+        "404":
+          description: Customer not found
+        "409":
+          description: Customer has an outstanding balance or invoice
 components:
   schemas:
     LoginInput:
@@ -713,7 +758,7 @@ components:
         imageUrl: { type: ["string", "null"] }
     ProductInput:
       type: object
-      required: [name, category, brand, model, specification, unit, quantity, price, barcode]
+      required: [name, category, brand, model, specification, unit, quantity, price]
       properties:
         name: { type: string, minLength: 1 }
         category: { type: string }
@@ -724,22 +769,26 @@ components:
         quantity: { type: number, minimum: 0 }
         price: { type: number, minimum: 0 }
         payable: { type: number, minimum: 0 }
-        barcode: { type: string }
+        barcode: { type: string, minLength: 1 }
         imei: { type: ["string", "null"] }
         serialNumber: { type: ["string", "null"] }
         imageUrl: { type: ["string", "null"] }
     ProductUpdate:
       type: object
+      additionalProperties: false
       properties:
-        name: { type: string }
-        category: { type: string }
-        brand: { type: string }
-        model: { type: string }
-        specification: { type: string }
-        unit: { type: string }
+        name: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1 }
+        brand: { type: string, minLength: 1 }
+        model: { type: string, minLength: 1 }
+        specification: { type: string, minLength: 1 }
+        unit: { type: string, minLength: 1 }
         price: { type: number, minimum: 0 }
         payable: { type: number, minimum: 0 }
         status: { type: string }
+        barcode: { type: string, minLength: 1 }
+        imei: { type: ["string", "null"], minLength: 1 }
+        serialNumber: { type: ["string", "null"], minLength: 1 }
     Sale:
       type: object
       required: [id, invoiceNumber, customerName, total, adjustedTotal, netPaid, paidCash, paidBankak, remaining, creditApplied, paymentMethod, createdAt]

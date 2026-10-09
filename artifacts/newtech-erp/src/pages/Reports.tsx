@@ -1,13 +1,22 @@
 import { useState, useMemo } from 'react';
-import { useGetSales, useGetExpenses, useGetDashboard, useGetReportSummary } from '@workspace/api-client-react';
-import { LoaderCircle, Printer, Calendar, Banknote, CircleDollarSign, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { useGetSales, useGetExpenses, useGetDashboard, useGetReportSummary, useGetSettlements, getGetSettlementsQueryKey } from '@workspace/api-client-react';
+import { LoaderCircle, Printer, Calendar, Banknote, CircleDollarSign, ArrowDownRight, ArrowUpRight, WalletCards } from 'lucide-react';
 import { formatMoney, formatDate } from '../lib/utils';
 import { BrandMark } from '../components/layout/BrandMark';
+import {
+  filterSettlementsByDateRange,
+  formatSettlementDate,
+  summarizeSettlements,
+} from './settlementReport';
 
 export function ReportsPage({ role }: { role: string }) {
+  const canViewSettlementReport = role === 'admin' || role === 'seller';
   const { data: sales, isPending: salesPending } = useGetSales();
   const { data: expenses, isPending: expensesPending } = useGetExpenses();
   const dashboard = useGetDashboard();
+  const settlementsQuery = useGetSettlements({
+    query: { queryKey: getGetSettlementsQueryKey(), enabled: canViewSettlementReport },
+  });
 
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0], // Last 30 days
@@ -30,6 +39,15 @@ export function ReportsPage({ role }: { role: string }) {
     });
   }, [expenses, dateRange]);
 
+  const filteredSettlements = useMemo(
+    () => filterSettlementsByDateRange(settlementsQuery.data ?? [], dateRange, 'UTC'),
+    [settlementsQuery.data, dateRange],
+  );
+  const settlementTotals = useMemo(
+    () => summarizeSettlements(filteredSettlements),
+    [filteredSettlements],
+  );
+
   const reportSummary = useGetReportSummary({
     start: dateRange.start,
     end: dateRange.end,
@@ -50,7 +68,12 @@ export function ReportsPage({ role }: { role: string }) {
     window.print();
   };
 
-  const isLoading = salesPending || expensesPending || dashboard.isPending || reportSummary.isPending;
+  const isLoading =
+    salesPending ||
+    expensesPending ||
+    dashboard.isPending ||
+    reportSummary.isPending ||
+    (canViewSettlementReport && settlementsQuery.isPending);
 
   return (
     <>
@@ -58,9 +81,13 @@ export function ReportsPage({ role }: { role: string }) {
         <div>
           <span className="page-kicker">تحليل ومتابعة</span>
           <h1>التقارير الشاملة</h1>
-          <p>تقارير المبيعات، المصروفات، وصافي الدخل للمتجر.</p>
+          <p>تقارير المبيعات، المصروفات، وتوريد الحصيلة للمتجر.</p>
         </div>
-        <button className="primary-action" onClick={handlePrint} disabled={isLoading}>
+        <button
+          className="primary-action"
+          onClick={handlePrint}
+          disabled={isLoading || (canViewSettlementReport && settlementsQuery.isError)}
+        >
           <Printer /> طباعة التقرير
         </button>
       </div>
@@ -97,7 +124,7 @@ export function ReportsPage({ role }: { role: string }) {
           <div className="print-header hidden-screen">
             <BrandMark />
             <div className="print-meta">
-              <h2>تقرير المبيعات والمصروفات</h2>
+              <h2>التقرير المالي وتوريد الحصيلة</h2>
               <p>الفترة: {dateRange.start} إلى {dateRange.end}</p>
               <p>تاريخ الطباعة: {new Date().toLocaleDateString('ar-EG')}</p>
             </div>
@@ -145,6 +172,91 @@ export function ReportsPage({ role }: { role: string }) {
                 </article>
               </div>
             </section>
+
+            {canViewSettlementReport && (
+              <section className="report-section settlement-report-section">
+                <h3 className="section-title"><WalletCards style={{color: '#317c53'}} /> تقرير توريد الحصيلة</h3>
+                {settlementsQuery.isError ? (
+                  <div className="settlement-report-error" role="alert">
+                    <span>تعذر تحميل توريدات الحصيلة، لذلك لا يمكن طباعة التقرير كاملًا.</span>
+                    <button
+                      type="button"
+                      className="secondary-action no-print"
+                      onClick={() => settlementsQuery.refetch()}
+                    >
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="stats-grid settlement-report-summary" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                      <article className="stat-card green">
+                        <p>إجمالي التوريدات</p>
+                        <strong>{formatMoney(settlementTotals.total)}</strong>
+                        <small>{settlementTotals.count} توريدة</small>
+                      </article>
+                      <article className="stat-card">
+                        <p>توريد عمر</p>
+                        <strong>{formatMoney(settlementTotals.omar)}</strong>
+                      </article>
+                      <article className="stat-card">
+                        <p>توريد سيف</p>
+                        <strong>{formatMoney(settlementTotals.saif)}</strong>
+                      </article>
+                      <article className="stat-card">
+                        <p>مدفوع كاش</p>
+                        <strong>{formatMoney(settlementTotals.cash)}</strong>
+                      </article>
+                      <article className="stat-card blue">
+                        <p>مدفوع بنكك</p>
+                        <strong>{formatMoney(settlementTotals.bankak)}</strong>
+                      </article>
+                    </div>
+                    <div className="print-table-container settlement-report-details">
+                      <h4>تفصيل توريدات الحصيلة</h4>
+                      <div className="table-wrapper">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>التاريخ</th>
+                              <th>قناة التوريد</th>
+                              <th>طريقة الدفع</th>
+                              <th>رقم الإشعار</th>
+                              <th>ملاحظات</th>
+                              <th>المبلغ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredSettlements.length > 0 ? filteredSettlements.map((settlement) => (
+                              <tr key={settlement.id}>
+                                <td className="number">{formatSettlementDate(settlement.createdAt, 'UTC')}</td>
+                                <td><strong>{settlement.channel}</strong></td>
+                                <td>{settlement.paymentMethod}</td>
+                                <td className="number">{settlement.reference}</td>
+                                <td>{settlement.notes || '—'}</td>
+                                <td className="number">{formatMoney(settlement.amount)}</td>
+                              </tr>
+                            )) : (
+                              <tr>
+                                <td colSpan={6} style={{ textAlign: 'center' }}>
+                                  لا توجد توريدات خلال الفترة المحددة.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td colSpan={5}>إجمالي الفترة</td>
+                              <td className="number">{formatMoney(settlementTotals.total)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
 
             {role === 'admin' && (
               <section className="report-section">

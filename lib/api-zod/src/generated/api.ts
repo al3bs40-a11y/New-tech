@@ -289,6 +289,7 @@ export const createProductBodyPayableMin = 0;
 
 
 
+
 export const CreateProductBody = zod.object({
   "name": zod.string().min(1),
   "category": zod.string(),
@@ -299,7 +300,7 @@ export const CreateProductBody = zod.object({
   "quantity": zod.number().min(createProductBodyQuantityMin),
   "price": zod.number().min(createProductBodyPriceMin),
   "payable": zod.number().min(createProductBodyPayableMin).optional(),
-  "barcode": zod.string(),
+  "barcode": zod.string().min(1).optional(),
   "imei": zod.string().nullish(),
   "serialNumber": zod.string().nullish(),
   "imageUrl": zod.string().nullish()
@@ -333,22 +334,34 @@ export const UpdateProductParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
+
+
+
+
+
+
 export const updateProductBodyPriceMin = 0;
 
 export const updateProductBodyPayableMin = 0;
 
 
 
+
+
+
 export const UpdateProductBody = zod.object({
-  "name": zod.string().optional(),
-  "category": zod.string().optional(),
-  "brand": zod.string().optional(),
-  "model": zod.string().optional(),
-  "specification": zod.string().optional(),
-  "unit": zod.string().optional(),
+  "name": zod.string().min(1).optional(),
+  "category": zod.string().min(1).optional(),
+  "brand": zod.string().min(1).optional(),
+  "model": zod.string().min(1).optional(),
+  "specification": zod.string().min(1).optional(),
+  "unit": zod.string().min(1).optional(),
   "price": zod.number().min(updateProductBodyPriceMin).optional(),
   "payable": zod.number().min(updateProductBodyPayableMin).optional(),
-  "status": zod.string().optional()
+  "status": zod.string().optional(),
+  "barcode": zod.string().min(1).optional(),
+  "imei": zod.string().min(1).nullish(),
+  "serialNumber": zod.string().min(1).nullish()
 })
 
 export const UpdateProductResponse = zod.object({
@@ -370,6 +383,16 @@ export const UpdateProductResponse = zod.object({
   "serialNumber": zod.string().nullish(),
   "imageUrl": zod.string().nullish()
 })
+
+
+/**
+ * @summary Delete an unused inventory product
+ */
+export const DeleteProductParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeleteProductResponse = zod.void()
 
 
 /**
@@ -743,5 +766,15 @@ export const CreateCustomerResponse = zod.object({
   "balance": zod.number(),
   "totalPurchases": zod.number()
 })
+
+
+/**
+ * @summary Delete a customer without outstanding debt
+ */
+export const DeleteCustomerParams = zod.object({
+  "id": zod.coerce.number().int()
+})
+
+export const DeleteCustomerResponse = zod.void()
 
 

@@ -1,5 +1,17 @@
 import { Router, type IRouter, type RequestHandler } from "express";
-import { and, desc, eq, gte, ilike, inArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   CreateCustomerBody,
   CreateExpenseBody,
@@ -9,6 +21,8 @@ import {
   CreateSaleAdjustmentResponse,
   CreateSaleBody,
   CreateSettlementBody,
+  DeleteCustomerParams,
+  DeleteProductParams,
   GetActivitiesResponse,
   GetCustomersResponse,
   GetDashboardResponse,
@@ -27,6 +41,11 @@ import {
 import { db } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { signedActivity } from "../lib/audit";
+import { canReadSettlementReport } from "../lib/settlements/access";
+import { createProduct } from "../lib/products/createProduct";
+import { prepareProductForCreation } from "../lib/products/prepareProductForCreation";
+import { productResponse } from "../lib/products/productResponse";
+import { updateProduct } from "../lib/products/updateProduct";
 import { postSale, type SaleTransaction } from "../lib/sales/postSale";
 import {
   activitiesTable,
@@ -50,6 +69,13 @@ const requireSeller: RequestHandler = (req, res, next) => {
   }
   next();
 };
+const requireSettlementReader: RequestHandler = (req, res, next) => {
+  if (!canReadSettlementReport(req.authUser?.role)) {
+    res.status(403).json({ error: "تقرير التوريدات متاح للمدير والبايع فقط" });
+    return;
+  }
+  next();
+};
 
 const money = (value: string | number | null | undefined): number =>
   Number(value ?? 0);
@@ -68,26 +94,13 @@ const normalizePhone = (value: string): string => {
   return /^0\d{9}$/.test(local) ? local : "";
 };
 
-function productResponse(product: typeof productsTable.$inferSelect) {
-  return {
-    id: product.id,
-    name: product.name,
-    category: product.category,
-    brand: product.brand,
-    model: product.model,
-    specification: product.specification,
-    unit: product.unit,
-    quantity: money(product.quantity),
-    price: money(product.price),
-    payable: money(product.payable),
-    profit: money(product.profit),
-    costKnown: product.costKnown,
-    status: product.status,
-    barcode: product.barcode,
-    imei: product.imei,
-    serialNumber: product.serialNumber,
-    imageUrl: product.imageUrl,
-  };
+function isForeignKeyViolation(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "23503"
+  );
 }
 
 function saleAdjustmentResponse(
@@ -317,10 +330,8 @@ router.get("/products", async (req, res, next) => {
       .from(productsTable)
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(productsTable.createdAt));
-    const products = rows.map(productResponse).map((product) =>
-      req.authUser?.role === "seller"
-        ? { ...product, payable: 0, profit: 0 }
-        : product,
+    const products = rows.map((product) =>
+      productResponse(product, req.authUser?.role === "seller"),
     );
     res.json(GetProductsResponse.parse(products));
   } catch (error) {
@@ -331,38 +342,36 @@ router.get("/products", async (req, res, next) => {
 router.post("/products", async (req, res, next) => {
   try {
     const body = CreateProductBody.parse(req.body);
-    const isSeller = req.authUser?.role === "seller";
-    if (!isSeller && body.payable === undefined) {
-      res.status(400).json({ error: "تكلفة المورد مطلوبة لإضافة الصنف" });
+    const prepared = prepareProductForCreation(body, req.authUser!.role);
+    if (!prepared.ok) {
+      res.status(400).json({ error: prepared.error });
       return;
     }
-    const payable = isSeller ? 0 : body.payable!;
-    const costKnown = !isSeller;
-    const profit = costKnown ? body.price - payable : 0;
-    const product = await db.transaction(async (tx) => {
-      const [product] = await tx
-        .insert(productsTable)
-        .values({
-          ...body,
-          quantity: String(body.quantity),
-          price: String(body.price),
-          payable: String(payable),
-          profit: String(profit),
-          costKnown,
-          status: isSeller ? "متوقف" : "متوفر",
-        })
-        .returning();
-      await tx.insert(activitiesTable).values(
-        signedActivity(req.authUser!, {
-          type: "inventory",
-          title: "إضافة بضاعة جديدة",
-          description: `تمت إضافة ${body.name} إلى المخزون`,
-          amount: String(body.price * body.quantity),
-        }),
-      );
-      return product;
-    });
-    res.status(201).json(productResponse(product));
+    const result = await createProduct(
+      prepared.values,
+      signedActivity(req.authUser!, {
+        type: "inventory",
+        title: "إضافة بضاعة جديدة",
+        description: `تمت إضافة ${body.name} إلى المخزون`,
+        amount: String(body.price * body.quantity),
+      }),
+      {
+        create: (values, activity) =>
+          db.transaction(async (tx) => {
+            const [product] = await tx
+              .insert(productsTable)
+              .values(values)
+              .returning();
+            await tx.insert(activitiesTable).values(activity);
+            return product;
+          }),
+      },
+    );
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(productResponse(result.product));
   } catch (error) {
     next(error);
   }
@@ -371,82 +380,129 @@ router.post("/products", async (req, res, next) => {
 router.patch("/products/:id", async (req, res, next) => {
   try {
     const { id } = UpdateProductParams.parse(req.params);
-    const body = UpdateProductBody.parse(req.body);
-    const [current] = await db
-      .select()
-      .from(productsTable)
-      .where(eq(productsTable.id, id))
-      .limit(1);
-    if (!current) {
-      res.status(404).json({ error: "Product not found" });
-      return;
-    }
-    const isSeller = req.authUser?.role === "seller";
-    if (
-      isSeller &&
-      (body.price === undefined ||
-        Object.keys(body).some((key) => key !== "price"))
-    ) {
-      res.status(403).json({ error: "يمكن للبايع تعديل سعر البيع فقط" });
-      return;
-    }
-    if (
-      !isSeller &&
-      body.status === "متوفر" &&
-      !current.costKnown &&
-      body.payable === undefined
-    ) {
-      res.status(400).json({ error: "سجل تكلفة المورد أولاً قبل تفعيل الصنف" });
-      return;
-    }
-    const values: Partial<typeof productsTable.$inferInsert> = {
-      updatedAt: new Date(),
-    };
-    if (body.name !== undefined) values.name = body.name;
-    if (body.category !== undefined) values.category = body.category;
-    if (body.brand !== undefined) values.brand = body.brand;
-    if (body.model !== undefined) values.model = body.model;
-    if (body.specification !== undefined) values.specification = body.specification;
-    if (body.unit !== undefined) values.unit = body.unit;
-    if (body.status !== undefined) values.status = body.status;
-    if (body.price !== undefined) values.price = String(body.price);
-    if (body.payable !== undefined) values.payable = String(body.payable);
-    if (body.payable !== undefined) values.costKnown = true;
-    if (body.price !== undefined || body.payable !== undefined) {
-      values.profit = String(
-        current.costKnown || body.payable !== undefined
-          ? (body.price ?? money(current.price)) -
-              (body.payable ?? money(current.payable))
-          : 0,
-      );
-    }
-    const product = await db.transaction(async (tx) => {
-      const [updated] = await tx
-        .update(productsTable)
-        .set(values)
-        .where(eq(productsTable.id, id))
-        .returning();
-      if (updated) {
-        await tx.insert(activitiesTable).values(
-          signedActivity(req.authUser!, {
-            type: "inventory",
-            title: "تعديل صنف في المخزون",
-            description: `تم تحديث بيانات ${current.name}`,
-            amount: 0,
+    const result = await updateProduct(
+      id,
+      req.body,
+      req.authUser!.role,
+      {
+        findById: async (productId) => {
+          const [product] = await db
+            .select()
+            .from(productsTable)
+            .where(eq(productsTable.id, productId))
+            .limit(1);
+          return product;
+        },
+        barcodeIsInUse: async (barcode, excludingId) => {
+          const [barcodeOwner] = await db
+            .select({ id: productsTable.id })
+            .from(productsTable)
+            .where(
+              and(
+                eq(productsTable.barcode, barcode),
+                ne(productsTable.id, excludingId),
+              ),
+            )
+            .limit(1);
+          return Boolean(barcodeOwner);
+        },
+        save: async (productId, values, current) =>
+          db.transaction(async (tx) => {
+            const [updated] = await tx
+              .update(productsTable)
+              .set(values)
+              .where(eq(productsTable.id, productId))
+              .returning();
+            if (updated) {
+              await tx.insert(activitiesTable).values(
+                signedActivity(req.authUser!, {
+                  type: "inventory",
+                  title: "تعديل صنف في المخزون",
+                  description: `تم تحديث بيانات ${current.name}`,
+                  amount: 0,
+                }),
+              );
+            }
+            return updated;
           }),
-        );
-      }
-      return updated;
-    });
-    if (!product) {
-      res.status(404).json({ error: "Product not found" });
+      },
+      UpdateProductBody.parse,
+    );
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
       return;
     }
-    res.json(productResponse(product));
+    res.json(productResponse(result.product, req.authUser?.role === "seller"));
   } catch (error) {
     next(error);
   }
 });
+
+router.delete(
+  "/products/:id",
+  requireAdmin,
+  async (req, res, next): Promise<void> => {
+    try {
+      const { id } = DeleteProductParams.parse(req.params);
+      const result = await db.transaction(async (tx) => {
+        const [product] = await tx
+          .select()
+          .from(productsTable)
+          .where(eq(productsTable.id, id))
+          .limit(1);
+        if (!product) return { kind: "not-found" as const };
+
+        const [saleItem] = await tx
+          .select({ id: saleItemsTable.id })
+          .from(saleItemsTable)
+          .where(eq(saleItemsTable.productId, id))
+          .limit(1);
+        const [replacement] = await tx
+          .select({ id: salesAdjustmentsTable.id })
+          .from(salesAdjustmentsTable)
+          .where(eq(salesAdjustmentsTable.replacementProductId, id))
+          .limit(1);
+        if (saleItem || replacement) return { kind: "referenced" as const };
+
+        const [deleted] = await tx
+          .delete(productsTable)
+          .where(eq(productsTable.id, id))
+          .returning({ id: productsTable.id });
+        if (!deleted) return { kind: "not-found" as const };
+
+        await tx.insert(activitiesTable).values(
+          signedActivity(req.authUser!, {
+            type: "inventory",
+            title: "حذف صنف من المخزون",
+            description: `تم حذف الصنف ${product.name}`,
+            amount: 0,
+          }),
+        );
+        return { kind: "deleted" as const };
+      });
+
+      if (result.kind === "not-found") {
+        res.status(404).json({ error: "الصنف غير موجود." });
+        return;
+      }
+      if (result.kind === "referenced") {
+        res.status(409).json({
+          error: "لا يمكن حذف الصنف لأنه مرتبط بفواتير أو تعديلات سابقة.",
+        });
+        return;
+      }
+      res.sendStatus(204);
+    } catch (error) {
+      if (isForeignKeyViolation(error)) {
+        res.status(409).json({
+          error: "لا يمكن حذف الصنف لأنه مرتبط بسجلات سابقة.",
+        });
+        return;
+      }
+      next(error);
+    }
+  },
+);
 
 router.get("/sales", async (_req, res, next) => {
   try {
@@ -1089,7 +1145,7 @@ router.post("/sales/:id/adjustments", async (req, res, next) => {
   }
 });
 
-router.get("/settlements", requireSeller, async (_req, res, next) => {
+router.get("/settlements", requireSettlementReader, async (_req, res, next) => {
   try {
     const rows = await db
       .select()
@@ -1351,5 +1407,77 @@ router.post("/customers", async (req, res, next) => {
     next(error);
   }
 });
+
+router.delete(
+  "/customers/:id",
+  requireAdmin,
+  async (req, res, next): Promise<void> => {
+    try {
+      const { id } = DeleteCustomerParams.parse(req.params);
+      const result = await db.transaction(async (tx) => {
+        // Serialize customer deletion with sales and adjustments, which use this lock
+        // before changing customer balances or creating outstanding invoices.
+        await tx.execute(sql`select pg_advisory_xact_lock(763104)`);
+
+        const [customer] = await tx
+          .select()
+          .from(customersTable)
+          .where(eq(customersTable.id, id))
+          .limit(1);
+        if (!customer) return { kind: "not-found" as const };
+
+        const [outstandingSale] = await tx
+          .select({ id: salesTable.id })
+          .from(salesTable)
+          .where(
+            and(
+              gt(salesTable.remaining, "0"),
+              or(
+                eq(salesTable.customerPhone, customer.phone),
+                and(
+                  isNull(salesTable.customerPhone),
+                  eq(salesTable.customerName, customer.name),
+                ),
+              ),
+            ),
+          )
+          .limit(1);
+        if (money(customer.balance) !== 0 || outstandingSale) {
+          return { kind: "outstanding-balance" as const };
+        }
+
+        const [deleted] = await tx
+          .delete(customersTable)
+          .where(eq(customersTable.id, id))
+          .returning({ id: customersTable.id });
+        if (!deleted) return { kind: "not-found" as const };
+
+        await tx.insert(activitiesTable).values(
+          signedActivity(req.authUser!, {
+            type: "customer",
+            title: "حذف سجل عميل",
+            description: "تم حذف سجل عميل من دليل العملاء.",
+            amount: 0,
+          }),
+        );
+        return { kind: "deleted" as const };
+      });
+
+      if (result.kind === "not-found") {
+        res.status(404).json({ error: "العميل غير موجود." });
+        return;
+      }
+      if (result.kind === "outstanding-balance") {
+        res.status(409).json({
+          error: "لا يمكن حذف العميل ما دام عليه رصيد أو فواتير مستحقة.",
+        });
+        return;
+      }
+      res.sendStatus(204);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 export default router;

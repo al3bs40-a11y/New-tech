@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { useGetCustomers, useCreateCustomer, getGetCustomersQueryKey } from '@workspace/api-client-react';
+import {
+  getGetActivitiesQueryKey,
+  getGetCustomersQueryKey,
+  getGetDashboardQueryKey,
+  useCreateCustomer,
+  useDeleteCustomer,
+  useGetCustomers,
+} from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Users, LoaderCircle, Plus, Search } from 'lucide-react';
+import { Users, LoaderCircle, Plus, Search, Trash2 } from 'lucide-react';
 import { formatMoney } from '../lib/utils';
+import { getApiErrorMessage } from '../lib/apiErrorMessage.ts';
 import * as Dialog from '@radix-ui/react-dialog';
 
 export function CustomersPage({ role }: { role: string }) {
@@ -12,6 +20,8 @@ export function CustomersPage({ role }: { role: string }) {
   
   const [open, setOpen] = useState(false);
   const [formData, setFormData] = useState({ name: '', phone: '', address: '', notes: '' });
+  const [deleteFeedback, setDeleteFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deletingCustomerId, setDeletingCustomerId] = useState<number | null>(null);
 
   const createCustomer = useCreateCustomer({
     mutation: {
@@ -23,6 +33,25 @@ export function CustomersPage({ role }: { role: string }) {
     }
   });
 
+  const deleteCustomer = useDeleteCustomer({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetCustomersQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetActivitiesQueryKey() });
+        setDeleteFeedback({ type: 'success', text: 'تم حذف سجل العميل.' });
+        setDeletingCustomerId(null);
+      },
+      onError: (error) => {
+        setDeleteFeedback({
+          type: 'error',
+          text: getApiErrorMessage(error, 'تعذر حذف العميل. حاول مرة أخرى.'),
+        });
+        setDeletingCustomerId(null);
+      },
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     createCustomer.mutate({
@@ -32,6 +61,17 @@ export function CustomersPage({ role }: { role: string }) {
         notes: formData.notes || null,
       }
     });
+  };
+
+  const confirmDeleteCustomer = (customer: NonNullable<typeof customers>[number]) => {
+    if (role !== 'admin' || deleteCustomer.isPending) return;
+    const confirmed = window.confirm(
+      `سيُحذف سجل العميل «${customer.name}» من القائمة، وستبقى الفواتير السابقة محفوظة ببياناتها. سيرفض النظام الحذف إذا كان عليه رصيد أو فاتورة مستحقة. هل تريد المتابعة؟`,
+    );
+    if (!confirmed) return;
+    setDeleteFeedback(null);
+    setDeletingCustomerId(customer.id);
+    deleteCustomer.mutate({ id: customer.id });
   };
 
   const filtered = (customers || []).filter(c => 
@@ -98,6 +138,17 @@ export function CustomersPage({ role }: { role: string }) {
           </div>
         </div>
 
+        {deleteFeedback && (
+          <div
+            className={`deletion-feedback ${deleteFeedback.type}`}
+            role={deleteFeedback.type === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            data-testid={`status-delete-customer-${deleteFeedback.type}`}
+          >
+            {deleteFeedback.text}
+          </div>
+        )}
+
         {isPending ? (
           <div className="page-state" style={{ minHeight: '30vh' }}>
             <LoaderCircle className="spin" />
@@ -112,6 +163,7 @@ export function CustomersPage({ role }: { role: string }) {
                   <th>العنوان</th>
                   <th>إجمالي المشتريات</th>
                   <th>الرصيد المتبقي (عليه)</th>
+                  {role === 'admin' && <th>إجراء</th>}
                 </tr>
               </thead>
               <tbody>
@@ -126,6 +178,23 @@ export function CustomersPage({ role }: { role: string }) {
                         {formatMoney(c.balance)}
                       </span>
                     </td>
+                    {role === 'admin' && (
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary-action destructive-action"
+                          onClick={() => confirmDeleteCustomer(c)}
+                          disabled={deleteCustomer.isPending}
+                          aria-label={`حذف العميل ${c.name}`}
+                          data-testid={`button-delete-customer-${c.id}`}
+                        >
+                          {deletingCustomerId === c.id
+                            ? <LoaderCircle className="spin" />
+                            : <Trash2 />}
+                          <span>حذف</span>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

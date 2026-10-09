@@ -2,3 +2,5 @@
 - [Sales posting invariants](sales-posting-invariants.md) — sale, stock, customer debt, and proceeds must post as one consistent transaction.
 - [Seller account history](seller-account-history.md) — do not re-seed the removed default seller; preserve historical activity signatures when accounts are deleted.
 - [Connector helper calls](connector-helper-calls.md) — invoke documented helpers inside `use impure`; `typeof` probes may misleadingly report `undefined`.
+- [Node ESM TypeScript tests](node-esm-typescript-tests.md) — relative TypeScript imports used by Node's strip-types tests need explicit `.ts` extensions.
+- [GitHub sync authentication](github-sync-auth.md) — a connected GitHub API integration does not itself authorize Git pushes or enable Replit Auto-sync.

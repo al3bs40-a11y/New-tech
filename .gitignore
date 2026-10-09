@@ -47,3 +47,8 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Keep these local images out of the public GitHub repository
+/attached_assets/0_IMG_2953_1790702525991.jpeg
+/attached_assets/IMG_2953_1790701396219.jpeg
+/attached_assets/IMG_3020_1791212075904.jpeg

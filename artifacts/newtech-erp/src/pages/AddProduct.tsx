@@ -1,29 +1,21 @@
-import { useState } from 'react';
+import { useReducer } from 'react';
 import { useCreateProduct, getGetProductsQueryKey, getGetDashboardQueryKey } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { PackagePlus, Save, LoaderCircle } from 'lucide-react';
 import { useLocation } from 'wouter';
+import {
+  addProductFormReducer,
+  initialAddProductFormState,
+} from './addProductFormState';
 
 export function AddProductPage({ role }: { role: string }) {
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  
-  const [formData, setFormData] = useState({
-    name: '',
-    category: '',
-    brand: '',
-    model: '',
-    specification: '',
-    unit: 'قطعة',
-    quantity: 1,
-    price: 0,
-    payable: 0,
-    barcode: '',
-    imei: '',
-    serialNumber: '',
-  });
+  const [formState, dispatch] = useReducer(
+    addProductFormReducer,
+    initialAddProductFormState,
+  );
+  const { formData, error, notice } = formState;
 
   const createProduct = useCreateProduct({
     mutation: {
@@ -33,19 +25,21 @@ export function AddProductPage({ role }: { role: string }) {
         if (role === 'admin') {
           setLocation('/inventory');
         } else {
-          setNotice('تمت إضافة الصنف. سيبقى متوقفاً حتى يسجل المدير تكلفة المورد.');
+          dispatch({
+            type: 'creationSucceeded',
+            notice: 'تمت إضافة الصنف. سيبقى متوقفاً حتى يسجل المدير تكلفة المورد.',
+          });
         }
       },
-      onError: () => {
-        setError('حدث خطأ أثناء إضافة المنتج. تأكد من صحة البيانات.');
+      onError: (error) => {
+        dispatch({ type: 'creationFailed', serverError: error });
       }
     }
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setNotice('');
+    dispatch({ type: 'submissionStarted' });
     const { payable: supplierCost, ...productDetails } = formData;
     createProduct.mutate({
       data: {
@@ -62,7 +56,7 @@ export function AddProductPage({ role }: { role: string }) {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    dispatch({ type: 'fieldChanged', name, value });
   };
 
   return (
@@ -73,23 +67,17 @@ export function AddProductPage({ role }: { role: string }) {
           <h1>إضافة بضاعة جديدة</h1>
           <p>
             {role === 'admin'
-              ? 'أدخل تفاصيل المنتج الجديد لإضافته للمخزون.'
-              : 'أدخل بيانات الصنف وسعر البيع؛ يسجل المدير تكلفة المورد قبل إتاحته للبيع.'}
+              ? 'أدخل تفاصيل المنتج الجديد لإضافته للمخزون. سيتم إنشاء الباركود تلقائيًا.'
+              : 'أدخل بيانات الصنف وسعر البيع؛ يسجل المدير تكلفة المورد قبل إتاحته للبيع. سيتم إنشاء الباركود تلقائيًا.'}
           </p>
         </div>
       </div>
 
       <div className="card" style={{ padding: '30px', maxWidth: '900px' }}>
         <form onSubmit={handleSubmit}>
-          <div className="form-grid">
-            <div className="input-group">
-              <label>اسم المنتج *</label>
-              <input required name="name" value={formData.name} onChange={handleChange} placeholder="مثال: مكيف اسبليت" />
-            </div>
-            <div className="input-group">
-              <label>الباركود *</label>
-              <input required name="barcode" value={formData.barcode} onChange={handleChange} placeholder="رقم الباركود" />
-            </div>
+          <div className="input-group">
+            <label>اسم المنتج *</label>
+            <input required name="name" value={formData.name} onChange={handleChange} placeholder="مثال: مكيف اسبليت" />
           </div>
 
           <div className="form-grid">

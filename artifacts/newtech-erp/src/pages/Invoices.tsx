@@ -20,7 +20,8 @@ import {
   Search,
 } from 'lucide-react';
 import { formatMoney, formatDate } from '../lib/utils';
-import { BrandMark } from '../components/layout/BrandMark';
+import { getApiErrorMessage } from '../lib/apiErrorMessage.ts';
+import { InvoicePrintSheet } from '../components/invoices/InvoicePrintSheet';
 import {
   Dialog,
   DialogContent,
@@ -262,7 +263,10 @@ export function InvoicesPage({ role }: { role: string }) {
       );
     } catch (error) {
       setAdjustmentError(
-        error instanceof Error ? error.message : 'تعذر حفظ العملية',
+        getApiErrorMessage(
+          error,
+          'تعذر حفظ عملية الاسترجاع أو الاستبدال. حاول مرة أخرى.',
+        ),
       );
     } finally {
       setSavingAdjustment(false);
@@ -723,105 +727,7 @@ export function InvoicesPage({ role }: { role: string }) {
         </DialogContent>
       </Dialog>
 
-      {/* Print Only Single Invoice Sheet */}
-      {invoiceToPrint && (
-        <div className="print-area invoice-sheet hidden-screen">
-          <div className="print-header">
-            <BrandMark />
-            <div className="print-meta">
-              <h2>فاتورة مبيعات</h2>
-              <p>رقم الفاتورة: <strong style={{ direction: 'ltr', display: 'inline-block' }}>{invoiceToPrint.invoiceNumber}</strong></p>
-              <p>التاريخ: {formatDate(invoiceToPrint.createdAt)}</p>
-            </div>
-          </div>
-
-          <div className="invoice-details">
-            <div className="invoice-box">
-              <span className="box-label">بيانات العميل</span>
-              <strong>{invoiceToPrint.customerName}</strong>
-              {invoiceToPrint.customerPhone && <p dir="ltr" style={{ textAlign: 'right' }}>{invoiceToPrint.customerPhone}</p>}
-            </div>
-            <div className="invoice-box">
-              <span className="box-label">معلومات الدفع</span>
-              <p>طريقة الدفع: <strong>{invoiceToPrint.paymentMethod}</strong></p>
-              <p>البائع: <strong>{invoiceToPrint.employeeName || '—'}</strong></p>
-            </div>
-          </div>
-
-          <div className="print-table-container invoice-lines">
-            <h4>تفاصيل الأصناف</h4>
-            <table>
-              <thead>
-                <tr>
-                  <th>الصنف</th>
-                  <th>الكمية</th>
-                  <th>سعر الوحدة</th>
-                  <th>الإجمالي</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoiceToPrint.items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.productName}</td>
-                    <td className="number">{item.quantity}</td>
-                    <td className="number">{formatMoney(item.unitPrice)}</td>
-                    <td className="number">{formatMoney(item.lineTotal)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="invoice-totals">
-            <div className="total-row">
-              <span>المجموع الفرعي</span>
-              <strong className="number">{formatMoney(invoiceToPrint.subtotal)}</strong>
-            </div>
-            {invoiceToPrint.discount > 0 && (
-              <div className="total-row discount">
-                <span>الخصم</span>
-                <strong className="number">-{formatMoney(invoiceToPrint.discount)}</strong>
-              </div>
-            )}
-            <div className="total-row grand">
-              <span>الصافي المطلوب</span>
-              <strong className="number">{formatMoney(invoiceToPrint.total)}</strong>
-            </div>
-            
-            <div className="payment-breakdown">
-              {invoiceToPrint.paidCash > 0 && (
-                <div className="total-row small">
-                  <span>مدفوع كاش</span>
-                  <strong className="number">{formatMoney(invoiceToPrint.paidCash)}</strong>
-                </div>
-              )}
-              {invoiceToPrint.paidBankak > 0 && (
-                <div className="total-row small">
-                  <span>مدفوع بنكك</span>
-                  <strong className="number">{formatMoney(invoiceToPrint.paidBankak)}</strong>
-                </div>
-              )}
-              {invoiceToPrint.creditApplied > 0 && (
-                <div className="total-row small">
-                  <span>مخصوم من رصيد العميل</span>
-                  <strong className="number">{formatMoney(invoiceToPrint.creditApplied)}</strong>
-                </div>
-              )}
-              {invoiceToPrint.remaining > 0 && (
-                <div className="total-row small remaining">
-                  <span>المتبقي (آجل)</span>
-                  <strong className="number">{formatMoney(invoiceToPrint.remaining)}</strong>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="invoice-footer">
-            <p>شكراً لتسوقكم من NEWTECH</p>
-            <p>البضاعة المباعة لا ترد ولا تستبدل إلا في حالة وجود عيب مصنعي خلال 3 أيام.</p>
-          </div>
-        </div>
-      )}
+      <InvoicePrintSheet invoice={invoiceToPrint} />
     </>
   );
 }

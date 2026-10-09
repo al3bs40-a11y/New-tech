@@ -188,7 +188,8 @@ export interface ProductInput {
   price: number;
   /** @minimum 0 */
   payable?: number;
-  barcode: string;
+  /** @minLength 1 */
+  barcode?: string;
   /** @nullable */
   imei?: string | null;
   /** @nullable */
@@ -198,17 +199,35 @@ export interface ProductInput {
 }
 
 export interface ProductUpdate {
+  /** @minLength 1 */
   name?: string;
+  /** @minLength 1 */
   category?: string;
+  /** @minLength 1 */
   brand?: string;
+  /** @minLength 1 */
   model?: string;
+  /** @minLength 1 */
   specification?: string;
+  /** @minLength 1 */
   unit?: string;
   /** @minimum 0 */
   price?: number;
   /** @minimum 0 */
   payable?: number;
   status?: string;
+  /** @minLength 1 */
+  barcode?: string;
+  /**
+     * @minLength 1
+     * @nullable
+     */
+  imei?: string | null;
+  /**
+     * @minLength 1
+     * @nullable
+     */
+  serialNumber?: string | null;
 }
 
 export interface Sale {

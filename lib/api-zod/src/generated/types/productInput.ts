@@ -20,7 +20,8 @@ export interface ProductInput {
   price: number;
   /** @minimum 0 */
   payable?: number;
-  barcode: string;
+  /** @minLength 1 */
+  barcode?: string;
   /** @nullable */
   imei?: string | null;
   /** @nullable */

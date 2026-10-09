@@ -42,25 +42,11 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import { getApiErrorMessage } from '../lib/apiErrorMessage.ts';
+import { createAccountMutationErrorHandlers } from '../lib/accountMutationErrors.ts';
 
 type PasswordFormValues = AccountPasswordInput & { confirmation: string };
 type SellerFormValues = CreateSellerAccountInput;
-
-function readServerError(error: unknown, fallback: string) {
-  const candidate = error as { data?: unknown; message?: unknown } | null;
-  const data = candidate?.data;
-  if (typeof data === 'string' && data.trim()) return data;
-  if (data && typeof data === 'object') {
-    const record = data as Record<string, unknown>;
-    for (const key of ['error', 'message', 'detail', 'title']) {
-      if (typeof record[key] === 'string' && record[key].trim()) return record[key] as string;
-    }
-  }
-  if (typeof candidate?.message === 'string' && candidate.message.trim()) {
-    return candidate.message;
-  }
-  return fallback;
-}
 
 function formatCreatedAt(value: string) {
   const date = new Date(value);
@@ -84,6 +70,13 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
   const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [sellerFeedback, setSellerFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const accountMutationErrorHandlers = createAccountMutationErrorHandlers({
+    profile: setProfileFeedback,
+    password: setPasswordFeedback,
+    createSeller: setSellerFeedback,
+    updateSeller: setSellerFeedback,
+    deleteSeller: setSellerFeedback,
+  });
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -129,10 +122,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
         setProfileSubmitting(false);
       },
       onError: (error) => {
-        setProfileFeedback({
-          type: 'error',
-          text: readServerError(error, 'تعذر تحديث بيانات الحساب. راجع البيانات وحاول مرة أخرى.'),
-        });
+        accountMutationErrorHandlers.profile(error);
         setProfileSubmitting(false);
       },
     },
@@ -144,12 +134,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
         passwordForm.reset();
         setPasswordFeedback({ type: 'success', text: 'تم تغيير كلمة المرور وإنهاء الجلسات القديمة. ستظل هذه الجلسة مفتوحة.' });
       },
-      onError: (error) => {
-        setPasswordFeedback({
-          type: 'error',
-          text: readServerError(error, 'تعذر تغيير كلمة المرور. تأكد من كلمة المرور الحالية وحاول مرة أخرى.'),
-        });
-      },
+      onError: accountMutationErrorHandlers.password,
     },
   });
 
@@ -160,12 +145,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
         sellerForm.reset();
         setSellerFeedback({ type: 'success', text: 'تم إنشاء حساب البايع وإضافته إلى القائمة.' });
       },
-      onError: (error) => {
-        setSellerFeedback({
-          type: 'error',
-          text: readServerError(error, 'تعذر إنشاء الحساب. قد يكون اسم المستخدم مستخدماً من قبل.'),
-        });
-      },
+      onError: accountMutationErrorHandlers.createSeller,
     },
   });
 
@@ -182,12 +162,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
           text: 'تم حذف الحساب مع الإبقاء على سجلاته السابقة.',
         });
       },
-      onError: (error) => {
-        setSellerFeedback({
-          type: 'error',
-          text: readServerError(error, 'تعذر حذف الحساب. حاول مرة أخرى.'),
-        });
-      },
+      onError: accountMutationErrorHandlers.deleteSeller,
     },
   });
 
@@ -198,12 +173,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
         setEditingSeller(null);
         setSellerFeedback({ type: 'success', text: 'تم تحديث بيانات البايع بنجاح.' });
       },
-      onError: (error) => {
-        setSellerFeedback({
-          type: 'error',
-          text: readServerError(error, 'تعذر تحديث بيانات البايع. راجع البيانات وحاول مرة أخرى.'),
-        });
-      },
+      onError: accountMutationErrorHandlers.updateSeller,
     },
   });
 
@@ -635,7 +605,7 @@ export function AdminAccountsPage({ user }: { user: AuthUser }) {
                 <div className="accounts-skeleton" aria-label="جاري تحميل حسابات الباعة" data-testid="status-sellers-loading" />
               ) : sellersQuery.isError ? (
                 <div className="accounts-query-error" role="alert" data-testid="status-sellers-error">
-                  <span>{readServerError(sellersQuery.error, 'تعذر تحميل حسابات الباعة من الخادم.')}</span>
+                  <span>{getApiErrorMessage(sellersQuery.error, 'تعذر تحميل حسابات الباعة من الخادم.')}</span>
                   <button type="button" className="accounts-refresh" data-testid="button-retry-sellers" onClick={() => sellersQuery.refetch()}>
                     <RefreshCw /> إعادة المحاولة
                   </button>

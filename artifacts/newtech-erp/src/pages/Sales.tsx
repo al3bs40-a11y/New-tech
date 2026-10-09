@@ -1,12 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { useGetProducts, useCreateSale, getGetSalesQueryKey, getGetProductsQueryKey, getGetDashboardQueryKey, getGetActivitiesQueryKey, getGetCustomersQueryKey, useGetCustomers } from '@workspace/api-client-react';
+import { useGetProducts, useCreateSale, getGetSalesQueryKey, getGetProductsQueryKey, getGetDashboardQueryKey, getGetActivitiesQueryKey, getGetCustomersQueryKey, useGetCustomers, getSaleDetails } from '@workspace/api-client-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ShoppingCart, Plus, Minus, X, CheckCircle2, LoaderCircle, Search, PackageSearch } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, X, CheckCircle2, LoaderCircle, Search, PackageSearch, Printer } from 'lucide-react';
 import { formatMoney } from '../lib/utils';
-import type { Product, SaleItemInput } from '@workspace/api-client-react';
+import type { Product, SaleDetail, SaleItemInput } from '@workspace/api-client-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Link } from 'wouter';
 import { findCustomerByPhone, normalizeSudanPhone, updateCustomerSelection } from '../lib/sales/customerSelection';
+import { InvoicePrintSheet } from '../components/invoices/InvoicePrintSheet';
 
 interface CartItem {
   product: Product;
@@ -60,6 +61,9 @@ export function SalesPage({ role }: { role: string }) {
   
   // Result modal state
   const [successInvoice, setSuccessInvoice] = useState<any>(null);
+  const [invoiceToPrint, setInvoiceToPrint] = useState<SaleDetail | null>(null);
+  const [printingInvoice, setPrintingInvoice] = useState(false);
+  const [invoicePrintError, setInvoicePrintError] = useState('');
 
   const createSale = useCreateSale({
     mutation: {
@@ -87,6 +91,27 @@ export function SalesPage({ role }: { role: string }) {
       }
     }
   });
+
+  useEffect(() => {
+    const clearPrintedInvoice = () => setInvoiceToPrint(null);
+    window.addEventListener('afterprint', clearPrintedInvoice);
+    return () => window.removeEventListener('afterprint', clearPrintedInvoice);
+  }, []);
+
+  const handlePrintInvoice = async () => {
+    if (!successInvoice?.id) return;
+    setPrintingInvoice(true);
+    setInvoicePrintError('');
+    try {
+      const invoice = await getSaleDetails(successInvoice.id);
+      setInvoiceToPrint(invoice);
+      window.setTimeout(() => window.print(), 150);
+    } catch {
+      setInvoicePrintError('تعذر تجهيز الفاتورة للطباعة. حاول مرة أخرى أو اطبعها من سجل الفواتير.');
+    } finally {
+      setPrintingInvoice(false);
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     if (!products) return [];
@@ -203,7 +228,7 @@ export function SalesPage({ role }: { role: string }) {
 
   return (
     <>
-      <div className="page-title-row">
+      <div className="page-title-row no-print">
         <div>
           <span className="page-kicker">نقطة البيع (POS)</span>
           <h1>المبيعات</h1>
@@ -211,7 +236,7 @@ export function SalesPage({ role }: { role: string }) {
         </div>
       </div>
 
-      <div className="pos-layout">
+      <div className="pos-layout no-print">
         <div className="pos-products">
           <div className="global-search" style={{ width: '100%', marginBottom: '15px' }}>
             <Search />
@@ -385,8 +410,8 @@ export function SalesPage({ role }: { role: string }) {
 
       <Dialog.Root open={!!successInvoice} onOpenChange={(open) => !open && setSuccessInvoice(null)}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content invoice-modal" dir="rtl">
+          <Dialog.Overlay className="dialog-overlay no-print" />
+          <Dialog.Content className="dialog-content invoice-modal no-print" dir="rtl">
             <div className="invoice-success">
               <CheckCircle2 />
               <h2>تم البيع بنجاح</h2>
@@ -400,17 +425,26 @@ export function SalesPage({ role }: { role: string }) {
               <div className="id-row"><span>المتبقي:</span> <strong>{formatMoney(successInvoice?.remaining)}</strong></div>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', marginTop: '25px' }}>
-              <button className="primary-action" style={{ flex: 1, justifyContent: 'center' }} onClick={() => window.print()}>
-                طباعة الفاتورة
+            <div style={{ display: 'flex', gap: '10px', marginTop: '25px' }} className="no-print">
+              <button
+                className="primary-action"
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={handlePrintInvoice}
+                disabled={printingInvoice}
+              >
+                {printingInvoice ? <LoaderCircle className="spin" /> : <Printer />}
+                {printingInvoice ? 'جاري تجهيز الفاتورة...' : 'طباعة الفاتورة'}
               </button>
               <Dialog.Close asChild>
                 <button type="button" className="secondary-action" style={{ flex: 1 }}>متابعة المبيعات</button>
               </Dialog.Close>
             </div>
+            {invoicePrintError && <div className="login-error no-print" role="alert">{invoicePrintError}</div>}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+
+      <InvoicePrintSheet invoice={invoiceToPrint} />
 
       <style>{`
         .pos-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
